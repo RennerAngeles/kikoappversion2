@@ -15,10 +15,10 @@ export interface Database {
           email: string
           first_name: string
           last_name: string
-          location: string
-          contact: string
-          gender: string
-          age: number
+          location: string | null
+          contact: string | null
+          gender: string | null
+          age: number | null
           profile_photo: string | null
           created_at: string
         }
@@ -27,10 +27,10 @@ export interface Database {
           email: string
           first_name: string
           last_name: string
-          location: string
-          contact: string
-          gender: string
-          age: number
+          location?: string | null
+          contact?: string | null
+          gender?: string | null
+          age?: number | null
           profile_photo?: string | null
           created_at?: string
         }
@@ -39,10 +39,10 @@ export interface Database {
           email?: string
           first_name?: string
           last_name?: string
-          location?: string
-          contact?: string
-          gender?: string
-          age?: number
+          location?: string | null
+          contact?: string | null
+          gender?: string | null
+          age?: number | null
           profile_photo?: string | null
           created_at?: string
         }
