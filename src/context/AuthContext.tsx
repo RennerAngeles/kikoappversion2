@@ -1,203 +1,230 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, AuthState } from '../types';
+import { User } from '../types';
+import { supabase, handleSupabaseError } from '../lib/supabase';
 
-interface AuthContextType extends AuthState {
+interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   signup: (userData: Omit<User, 'id'>) => Promise<boolean>;
   logout: () => void;
   updateProfile: (userData: Partial<User>) => Promise<boolean>;
-  getRegisteredUsers: () => User[];
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [authState, setAuthState] = useState<AuthState>({
+  const [authState, setAuthState] = useState<{ user: User | null; isAuthenticated: boolean }>({
     user: null,
     isAuthenticated: false,
   });
 
   useEffect(() => {
-    // Check for saved auth state in localStorage
-    const savedUser = localStorage.getItem('kikoUser');
-    if (savedUser) {
+    // Check for existing session
+    const checkSession = async () => {
       try {
-        const parsedUser = JSON.parse(savedUser);
-        setAuthState({
-          user: parsedUser,
-          isAuthenticated: true
-        });
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        if (session?.user) {
+          const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (userError) throw userError;
+
+          if (userData) {
+            setAuthState({
+              user: {
+                id: userData.id,
+                email: userData.email,
+                firstName: userData.first_name,
+                lastName: userData.last_name,
+                location: userData.location,
+                contact: userData.contact,
+                gender: userData.gender,
+                age: userData.age,
+                profilePhoto: userData.profile_photo,
+              },
+              isAuthenticated: true,
+            });
+          }
+        }
       } catch (error) {
-        console.error('Failed to parse saved user:', error);
-        localStorage.removeItem('kikoUser');
+        console.error('Session check error:', error);
       }
-    }
+    };
 
-    // Initialize admin account if it doesn't exist
-    const registeredUsers = getRegisteredUsers();
-    if (!registeredUsers.find(user => user.email === 'admin@gmail.com')) {
-      const adminUser: User = {
-        id: 'admin',
-        firstName: 'Admin',
-        lastName: 'User',
-        email: 'admin@gmail.com',
-        password: 'admin123',
-        location: 'System',
-        contact: 'N/A',
-        gender: 'Other',
-        age: 0,
-      };
-      saveRegisteredUsers([...registeredUsers, adminUser]);
-    }
-
-    // Initialize Renner's account if it doesn't exist
-    if (!registeredUsers.find(user => user.email === 'ren@gmail.com')) {
-      const rennerUser: User = {
-        id: 'renner',
-        firstName: 'Renner',
-        lastName: 'Angeles',
-        email: 'ren@gmail.com',
-        password: '@hakdog123',
-        location: 'Manila',
-        contact: '09123456789',
-        gender: 'Male',
-        age: 21,
-      };
-      saveRegisteredUsers([...registeredUsers, rennerUser]);
-    }
+    checkSession();
   }, []);
-
-  // Load registered users from localStorage
-  const getRegisteredUsers = (): User[] => {
-    const savedUsers = localStorage.getItem('kikoRegisteredUsers');
-    return savedUsers ? JSON.parse(savedUsers) : [];
-  };
-
-  // Save registered users to localStorage
-  const saveRegisteredUsers = (users: User[]) => {
-    localStorage.setItem('kikoRegisteredUsers', JSON.stringify(users));
-  };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Check registered users
-      const registeredUsers = getRegisteredUsers();
-      const user = registeredUsers.find(u => 
-        u.email.toLowerCase() === email.toLowerCase() && u.password === password
-      );
-
-      if (!user) {
-        return false;
-      }
-      
-      setAuthState({
-        user,
-        isAuthenticated: true
+      const { data: { user: authUser }, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
-      
-      localStorage.setItem('kikoUser', JSON.stringify(user));
+
+      if (authError) throw authError;
+      if (!authUser) return false;
+
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+
+      if (userError) throw userError;
+      if (!userData) return false;
+
+      setAuthState({
+        user: {
+          id: userData.id,
+          email: userData.email,
+          firstName: userData.first_name,
+          lastName: userData.last_name,
+          location: userData.location,
+          contact: userData.contact,
+          gender: userData.gender,
+          age: userData.age,
+          profilePhoto: userData.profile_photo,
+        },
+        isAuthenticated: true,
+      });
+
       return true;
     } catch (error) {
-      console.error('Login error:', error);
+      handleSupabaseError(error);
       return false;
     }
   };
 
   const signup = async (userData: Omit<User, 'id'>): Promise<boolean> => {
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const registeredUsers = getRegisteredUsers();
-      
-      // Check if email already exists
-      if (registeredUsers.some(user => user.email.toLowerCase() === userData.email.toLowerCase())) {
-        return false;
-      }
-
-      // Create new user
-      const newUser: User = {
-        ...userData,
-        id: Math.random().toString(36).substring(2, 11),
-      };
-      
-      // Save to registered users
-      saveRegisteredUsers([...registeredUsers, newUser]);
-      
-      // Log in the new user
-      setAuthState({
-        user: newUser,
-        isAuthenticated: true
+      // Create auth user
+      const { data: { user: authUser }, error: authError } = await supabase.auth.signUp({
+        email: userData.email,
+        password: userData.password!,
       });
-      
-      localStorage.setItem('kikoUser', JSON.stringify(newUser));
+
+      if (authError) throw authError;
+      if (!authUser) return false;
+
+      // Create user profile
+      const { data: newUser, error: userError } = await supabase
+        .from('users')
+        .insert([{
+          id: authUser.id,
+          email: userData.email,
+          first_name: userData.firstName,
+          last_name: userData.lastName,
+          location: userData.location,
+          contact: userData.contact,
+          gender: userData.gender,
+          age: userData.age,
+          profile_photo: userData.profilePhoto,
+        }])
+        .select()
+        .single();
+
+      if (userError) throw userError;
+      if (!newUser) return false;
+
+      setAuthState({
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          firstName: newUser.first_name,
+          lastName: newUser.last_name,
+          location: newUser.location,
+          contact: newUser.contact,
+          gender: newUser.gender,
+          age: newUser.age,
+          profilePhoto: newUser.profile_photo,
+        },
+        isAuthenticated: true,
+      });
+
       return true;
     } catch (error) {
-      console.error('Signup error:', error);
+      handleSupabaseError(error);
       return false;
     }
   };
 
-  const logout = () => {
-    setAuthState({
-      user: null,
-      isAuthenticated: false
-    });
-    localStorage.removeItem('kikoUser');
+  const logout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+
+      setAuthState({
+        user: null,
+        isAuthenticated: false,
+      });
+    } catch (error) {
+      handleSupabaseError(error);
+    }
   };
 
   const updateProfile = async (userData: Partial<User>): Promise<boolean> => {
     try {
-      if (!authState.user) {
-        return false;
-      }
-      
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const updatedUser: User = {
-        ...authState.user,
-        ...userData
-      };
-      
-      // Update in registered users
-      const registeredUsers = getRegisteredUsers();
-      const updatedUsers = registeredUsers.map(user => 
-        user.id === updatedUser.id ? updatedUser : user
-      );
-      saveRegisteredUsers(updatedUsers);
-      
+      if (!authState.user?.id) return false;
+
+      const { data: updatedUser, error } = await supabase
+        .from('users')
+        .update({
+          first_name: userData.firstName,
+          last_name: userData.lastName,
+          location: userData.location,
+          contact: userData.contact,
+          gender: userData.gender,
+          age: userData.age,
+          profile_photo: userData.profilePhoto,
+        })
+        .eq('id', authState.user.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!updatedUser) return false;
+
       setAuthState({
-        ...authState,
-        user: updatedUser
+        user: {
+          ...authState.user,
+          firstName: updatedUser.first_name,
+          lastName: updatedUser.last_name,
+          location: updatedUser.location,
+          contact: updatedUser.contact,
+          gender: updatedUser.gender,
+          age: updatedUser.age,
+          profilePhoto: updatedUser.profile_photo,
+        },
+        isAuthenticated: true,
       });
-      
-      localStorage.setItem('kikoUser', JSON.stringify(updatedUser));
+
       return true;
     } catch (error) {
-      console.error('Update profile error:', error);
+      handleSupabaseError(error);
       return false;
     }
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      ...authState, 
-      login, 
-      signup, 
-      logout, 
+    <AuthContext.Provider value={{
+      ...authState,
+      login,
+      signup,
+      logout,
       updateProfile,
-      getRegisteredUsers
     }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = (): AuthContextType => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
